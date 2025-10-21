@@ -15,7 +15,7 @@ public class SokoBot {
     //auxillaries
     private ArrayList<int[]> Position_deadlocks = new ArrayList<>(); //if box is in any of these positions, do not add to frontier aka prune
     private int box_count = 0; // this will be used for key in hashmap when decoding positions
-    private int[] box_assignments; //box to goal assignments through self-made Hungarian algo
+    private int[][] box_assignments; //box to goal assignments through self-made Hungarian algo
 
     private HashMap<String, State> ExploredStates = new HashMap<>();
     
@@ -35,8 +35,15 @@ public class SokoBot {
      * 4. Implement Dynamic Programming to store best actions from player to boxes
      * 5. implement A* search
      */
+    
     initializeMapData(width, height, mapData, itemsData);
     // do assignment of boxes to goals using Hungarian algo (explanation at Manhattan Distance function)
+    HungarianAssignment box_assignment_HA = new HungarianAssignment(this.box_count);
+    this.box_assignments = box_assignment_HA.HungarianAlgorithm();
+    //format of assignments is {{Row0, Col2}, {Row1, Col1}, {Row2, Col0}, {Row3, Col3}} (example for 4 boxes)
+    //so {{Box0, Goal2}, {Box1, Goal1}, {Box2, Goal0}, {Box3, Goal3}}
+
+
     /*
      * YOU NEED TO REWRITE THE IMPLEMENTATION OF THIS METHOD TO MAKE THE BOT SMARTER
      */
@@ -55,15 +62,16 @@ public class SokoBot {
 
   //Initially I was thinking of doing manhattan distance of each box to every goal, it wasn't efficient, and I thought rin na choosing the min manhattahn idstance for each box to their closest goal is not enough (too much repeated computation). I came across Hungarian algorithm which reduces the computation needed for not needing the repeated finding of minimum distances. I implemented box to goal assigned manhattan distances (that were assigned via Hungarian algo)
   //serves as heuristic function
+  // ONLY COMPUTES THE MANHATTAN DISTANCE OF BOXES TO ASSIGNED GOALS, NO PENALTY YET FOR DEADLOCKS
   private int computeManhattanDistances() {
+    int totalDistance = 0;
     for (int i = 0; i < box_count; i++) {
-      //FINISH LATERR USE ASSIGNMENTS ARRAY
-      int[] boxPos = Position_boxes.get(i);
-      for (int j = 0; j < Position_goals.size(); j++) {
-
+      //use this.box_assignments to match the box to their goals for manhattan distance checking
+      //this.box_assignments[i][1] gives the goal index assigned to box i
+      int[] goal_position = this.Position_goals.get(this.box_assignments[i][1]);
+      totalDistance += computeManhattanDistance(goal_position, this.Position_boxes.get(i));
       }
-    }
-
+    return totalDistance;
   }
 
   private int computeManhattanDistance(int[] pos1, int[] pos2) {
@@ -84,7 +92,11 @@ public class SokoBot {
   }
 
   private void initializeMapData(int width, int height, char[][] mapData, char[][] itemsData) {
-    for (int i = 1; i < height-1; i++) // only for the playable tiles (because boundary walls) no need to compute
+    this.Position_boxes.clear();
+    this.Position_goals.clear();
+    this.Position_deadlocks.clear();
+    this.box_count = 0;
+    for (int i = 1; i < height-1; i++) { // only for the playable tiles (because boundary walls) no need to compute
       for (int j = 1; j < width-1; j++) {
         if (mapData[i][j] == ' ') {
           //check for deadlock pos (corner)
@@ -105,6 +117,7 @@ public class SokoBot {
             //lower diagonal right
             else if (mapData[i+1][j+1] == '#' && mapData[i][j+1] == '#')
               Position_deadlocks.add(new int[]{i, j});
+          }
         }
         if (mapData[i][j] == '#') continue;
         if (mapData[i][j] == '.') Position_goals.add(new int[]{i, j});
@@ -114,11 +127,10 @@ public class SokoBot {
         }
         if (itemsData[i][j] == '@') Position_player = new int[]{i, j};
       }
-    }
 
-    //create the box assignments array
-    box_assignments = new int[box_count];
-  }
+    }
+      
+  } // reading of positions, tile penalties (deadlocks), done.
 
   //case use: HungarianAssignment initialize_box_count = new HungarianAssignment(box_count);
   //int[][] assignments = initialize_box_count.HungarianAlgorithm();  
@@ -193,13 +205,14 @@ public class SokoBot {
         }
       }
 
-      //optimal assignment TO BE FILLED
+      //optimal assignments
       int[][] HungarianAssignments = new int[this.box_count][2];
       for (int i = 0; i < this.box_count; i++) {
-        HungarianAssignments[i] = new int[]{i, ColSquares[i]};
+        HungarianAssignments[i] = new int[]{i, RowSquares[i]};
       }
 
       return HungarianAssignments;
+      //the format of the assignments is {{Row0, Col2}, {Row1, Col1}, {Row2, Col0}, {Row3, Col3}}
     }
 
     private void Step1and2_columnrowreduction() {
