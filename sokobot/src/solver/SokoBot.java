@@ -58,7 +58,7 @@ public class SokoBot {
         //establish THE VERY FIRSTTTT.... state.
 
         String InitialStateKey = EncodeState(this.Position_player, this.Position_boxes);
-        State initialState = new State(InitialStateKey, null, 0, computeManhattanDistances(), '1');
+        State initialState = new State(InitialStateKey, null, 0, computeManhattanDistances2(), '1');
         Frontier.add(initialState);
 
         // A* babyyyyy
@@ -132,41 +132,43 @@ public class SokoBot {
     }
 
     private int calculateWallProximityPenalty() {
-        int penalty = 0;
+      int penalty = 0;
+      for (int[] box : this.Position_boxes) {
+        boolean box_on_goal = false;
+        for (int[] goal : this.Position_goals) {
+          if (Arrays.equals(box,goal)) {
+            box_on_goal = true;
+            break;
+          }
 
-        for (int i = 0; i < this.box_count; i++) {
-            int[] box = this.Position_boxes.get(i);
-
-            boolean onGoal = false;
-            for (int[] goal : this.Position_goals) {
-                if (box[0] == goal[0] && box[1] == goal[1]) {
-                    onGoal = true;
-                    break;
-                }
-            }
-            if (onGoal) continue;
-
-            int wallCount = 0;
-            if (this.WallsMap[box[0]-1][box[1]] == '#') wallCount++; 
-            if (this.WallsMap[box[0]+1][box[1]] == '#') wallCount++; 
-            if (this.WallsMap[box[0]][box[1]-1] == '#') wallCount++; 
-            if (this.WallsMap[box[0]][box[1]+1] == '#') wallCount++; 
-
-            if (wallCount >= 3) {
-                penalty += 50;
-            }  else {
-                    penalty += 15;
-                }
-            }
-         return penalty;
+          }
+          if (!box_on_goal && isWallNearbyBox(box)) {
+            penalty += 15;
+          }
         }
+      return penalty;
+    }
+
+    private boolean isWallNearbyBox(int[] box) {
+      return (WallsMap[box[0]-1][box[1]] == '#' || WallsMap[box[0]+1][box[1]] == '#'
+          ||  WallsMap[box[0]][box[1]-1] == '#' ||  WallsMap[box[0]][box[1]+1] == '#');
+    }
+
+    public int calculatePlayer_NearbyBoxPenalty() {
+      int min_distance = Integer.MAX_VALUE;
+      for (int[] box : this.Position_boxes) {
+        min_distance = Math.min(computeManhattanDistance(box, this.Position_player), min_distance);
+      }
+      return min_distance; //we want to penalize being away from nearest box
+    }
 
 
     private int calculateAllPenalties() {
         int totalPenalty = 0;
 
-        totalPenalty += calculateClusteredBoxesPenalty();
+        //totalPenalty += calculateClusteredBoxesPenalty();
         totalPenalty += calculateWallProximityPenalty();
+        totalPenalty += calculatePlayer_NearbyBoxPenalty();
 
         return totalPenalty;
     }
@@ -176,10 +178,9 @@ public class SokoBot {
             if (Valid_Move(move)) {
                 UpdatePositions(move);
 
-                int h_cost = computeManhattanDistances();
+                int h_cost = computeManhattanDistances2();
 
-                int penalties = calculateAllPenalties();
-                h_cost += penalties;
+                h_cost += calculateAllPenalties();
 
                 State newState = new State(
                         EncodeState(this.Position_player, this.Position_boxes),
@@ -492,6 +493,38 @@ public class SokoBot {
     3. IsGoalState
 
   */
+
+    
+    
+    // at this point I think it is better we have prioritization on the box that is closest to its goal.
+    //greedy Manhattan aka better Hungarian
+    private int computeManhattanDistances2() {
+      int heuristic = 0;
+      int min_distance, best_goal_index;
+      int[][] box_to_goal_distances = new int[this.box_count][this.box_count];
+      for (int i = 0; i < this.box_count; i++) { //for boxes
+        for (int j = 0; j < this.box_count; j++) { //for goals
+          box_to_goal_distances[i][j] = computeManhattanDistance(this.Position_boxes.get(i), this.Position_goals.get(j));
+        }
+      }
+
+      boolean[] box_set_to_goal = new boolean[this.box_count];
+      for (int i = 0; i < this.box_count; i++) { //for boxes
+        min_distance = Integer.MAX_VALUE;
+        best_goal_index = -1;
+        for (int j = 0; j < this.box_count; j++) { //for goals
+          if (!box_set_to_goal[j]) {
+            if (box_to_goal_distances[i][j] < min_distance) {
+              min_distance = box_to_goal_distances[i][j];
+              best_goal_index = j;
+            }
+          }
+        }
+        box_set_to_goal[best_goal_index] = true;
+        heuristic += min_distance*min_distance; //to make things more punishing the further boxes are
+      }
+      return heuristic;
+    }
 
     //Initially I was thinking of doing manhattan distance of each box to every goal, it wasn't efficient, and I thought rin na choosing the min manhattahn idstance for each box to their closest goal is not enough (too much repeated computation). I came across Hungarian algorithm which reduces the computation needed for not needing the repeated finding of minimum distances. I implemented box to goal assigned manhattan distances (that were assigned via Hungarian algo)
     //serves as heuristic function
@@ -993,8 +1026,6 @@ public class SokoBot {
             }
         }
     }  // end of HungarianAssignment class
-
-}
 
 }
 
