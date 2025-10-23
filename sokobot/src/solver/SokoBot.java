@@ -168,7 +168,7 @@ public class SokoBot {
 
         //totalPenalty += calculateClusteredBoxesPenalty();
         totalPenalty += calculateWallProximityPenalty();
-        totalPenalty += calculatePlayer_NearbyBoxPenalty();
+        //totalPenalty += calculatePlayer_NearbyBoxPenalty();
 
         return totalPenalty;
     }
