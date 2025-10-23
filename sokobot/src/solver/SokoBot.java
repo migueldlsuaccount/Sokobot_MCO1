@@ -4,20 +4,27 @@ import java.util.*;
 
 public class SokoBot {
 
-  // mapData contains walls (#) and goal boxes (.)
+    // mapData contains walls (#) and goal boxes (.)
     // itemsData contains boxes ($) and player (@)
 
     // so we need positions of boxes, player, and goal boxes... will also be used later for heuristic calculation
+    private int width, height;
     private ArrayList<int[]> Position_boxes = new ArrayList<>(); //will be modified during decoding of states
+    private HashSet<String> boxMap = new HashSet<>(); //for linear time checking of boxes and collisions quickly
     private ArrayList<int[]> Position_goals = new ArrayList<>();
     private int[] Position_player = new int[2]; //also to be modified during decoding of states
-
+    private char[][] WallsMap; //for checking walls
     //auxillaries
-    private ArrayList<int[]> Position_deadlocks = new ArrayList<>(); //if box is in any of these positions, do not add to frontier aka prune
+    private HashSet<String> Position_deadlocks = new HashSet<>(); //if box is in any of these positions, do not add to frontier aka prune
     private int box_count = 0; // this will be used for key in hashmap when decoding positions
     private int[][] box_assignments; //box to goal assignments through self-made Hungarian algo
 
     private HashMap<String, State> ExploredStates = new HashMap<>();
+
+    //Stumbled upon PriorityQueue, where we could store Frontiers in order based on a value that is being compareTo()'d by the class implementeing Comparator:
+    //https://www.geeksforgeeks.org/java/priority-queue-in-java/
+    private PriorityQueue<State> Frontier;
+    private char[] validMoves;
     
     //hashkey is in the format: "px py b1x b1y b2x b2y ..."
     
@@ -35,14 +42,48 @@ public class SokoBot {
      * 4. Implement Dynamic Programming to store best actions from player to boxes
      * 5. implement A* search
      */
-    
+
     initializeMapData(width, height, mapData, itemsData);
     // do assignment of boxes to goals using Hungarian algo (explanation at Manhattan Distance function)
+    
     HungarianAssignment box_assignment_HA = new HungarianAssignment(this.box_count);
     this.box_assignments = box_assignment_HA.HungarianAlgorithm();
     //format of assignments is {{Row0, Col2}, {Row1, Col1}, {Row2, Col0}, {Row3, Col3}} (example for 4 boxes)
     //so {{Box0, Goal2}, {Box1, Goal1}, {Box2, Goal0}, {Box3, Goal3}}
 
+    //make sure to update this.box_positions when decoding states for heuristic computation
+    
+    this.Frontier = new PriorityQueue<>();
+
+    //establish THE VERY FIRSTTTT.... state.
+
+    String InitialStateKey = EncodeState(this.Position_player, this.Position_boxes);
+    State initialState = new State(InitialStateKey, null, 0, computeManhattanDistances(), '1');
+    Frontier.add(initialState);
+
+    // A* babyyyyy
+    while(!Frontier.isEmpty()) 
+    {
+      //get the current state with lowest f_cost
+      State currentState = Frontier.poll();
+
+      if (this.ExploredStates.containsKey(currentState.getStateKey())) {
+        continue; // state already explored
+      }
+
+      //updates Position_boxes, Position_player, boxMap
+      DecodeState(currentState.getStateKey());
+
+      //TO BE FILLED LATER
+      if (State_isA_GoalState()) {
+        return PathToSolution(currentState);
+      }
+
+      ExploredStates.put(currentState.getStateKey(), currentState);
+
+      //exploration!!!: note current positions are from decoded current state explored
+      ExploreNeighborStates(currentState.getStateKey(), currentState.getG_Cost());
+    }
 
     /*
      * YOU NEED TO REWRITE THE IMPLEMENTATION OF THIS METHOD TO MAKE THE BOT SMARTER
@@ -60,9 +101,344 @@ public class SokoBot {
     return "lrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlrlr";
   }
 
+  //to be filled laterr
+  //we currently have current state positions
+  //our format is "uldrluludur"
+  public String PathToSolution(State goalState) {
+    StringBuilder solutionPath = new StringBuilder();
+    while ((goalState.getPrevMove() != '1') && (goalState.getPreviousStateKey() != null)) {
+      solutionPath.insert(0, goalState.getPrevMove());
+      goalState = this.ExploredStates.get(goalState.getPreviousStateKey());
+    }
+    return solutionPath.toString(); //temporary
+  }
+
+  public void ExploreNeighborStates(String prevStateKey, int g_cost) {
+    for (char move : this.validMoves) {
+      //check first if move is valid before generating new state
+      if (Valid_Move(move)) {
+        //idea, include checking of state in Valid_Move if state is explored
+        //if valid, update positions accordingly
+        UpdatePositions(move);
+        
+        int h_cost = computeHeuristic();
+
+        //we can add penalties here
+        //h_cost += penaltyfunction();
+
+        State newState = new State(
+          EncodeState(this.Position_player, this.Position_boxes),
+          prevStateKey, g_cost + 1, g_cost + 1 + h_cost, move);
+
+        this.Frontier.add(newState);
+
+        DecodeState(prevStateKey); //revert back to previous state for next move exploration
+      }
+    }
+  }
+
+  //current version for faster computation
+  public int computeHeuristic() {
+    return computeManhattanDistances();
+  }
+
+  //this is the first version of computeHeuristic, very expensive
+  // public int computeHeuristic() {
+  //   HungarianAssignment box_assignment_HA = new HungarianAssignment(this.box_count);
+  //   this.box_assignments = box_assignment_HA.HungarianAlgorithm();
+  //   return computeManhattanDistances();
+  // }
+
+  public void UpdatePositions(char move) {
+    switch(move) {
+      case 'u':
+        if (this.boxMap.contains((this.Position_player[0]-1) + "," + this.Position_player[1])) {
+          //moving box
+          this.boxMap.add((this.Position_player[0]-2) + "," + this.Position_player[1]);
+          this.boxMap.remove((this.Position_player[0]-1) + "," + this.Position_player[1]);
+
+          //also update Position_boxes
+          for (int i = 0; i < this.box_count; i++) {
+            if ((this.Position_boxes.get(i)[0] == this.Position_player[0]-1) &&
+                (this.Position_boxes.get(i)[1] == this.Position_player[1])) {
+              this.Position_boxes.get(i)[0] = this.Position_player[0]-2;
+              break;
+            }
+          }
+        }
+        this.Position_player[0]--;
+      break;
+      case 'd':
+        if (this.boxMap.contains((this.Position_player[0]+1) + "," + this.Position_player[1])) {
+          //moving box
+          this.boxMap.add((this.Position_player[0]+2) + "," + this.Position_player[1]);
+          this.boxMap.remove((this.Position_player[0]+1) + "," + this.Position_player[1]);
+
+          //also update Position_boxes
+          for (int i = 0; i < this.box_count; i++) {
+            if ((this.Position_boxes.get(i)[0] == this.Position_player[0]+1) &&
+                (this.Position_boxes.get(i)[1] == this.Position_player[1])) {
+              this.Position_boxes.get(i)[0] = this.Position_player[0]+2;
+              break;
+            }
+          }
+        }
+        this.Position_player[0]++;
+      break;
+      case 'l':
+        if (this.boxMap.contains(this.Position_player[0] + "," + (this.Position_player[1]-1))) {
+          //moving box
+          this.boxMap.add(this.Position_player[0] + "," + (this.Position_player[1]-2));
+          this.boxMap.remove(this.Position_player[0] + "," + (this.Position_player[1]-1));
+
+          //also update Position_boxes
+          for (int i = 0; i < this.box_count; i++) {
+            if ((this.Position_boxes.get(i)[0] == this.Position_player[0]) &&
+                (this.Position_boxes.get(i)[1] == this.Position_player[1]-1)) {
+              this.Position_boxes.get(i)[1] = this.Position_player[1]-2;
+              break;
+            }
+          }
+        }
+        this.Position_player[1]--;
+      break;
+      case 'r':
+        if (this.boxMap.contains(this.Position_player[0] + "," + (this.Position_player[1]+1))) {
+          //moving box
+          this.boxMap.add(this.Position_player[0] + "," + (this.Position_player[1]+2));
+          this.boxMap.remove(this.Position_player[0] + "," + (this.Position_player[1]+1));
+
+          //also update Position_boxes
+          for (int i = 0; i < this.box_count; i++) {
+            if ((this.Position_boxes.get(i)[0] == this.Position_player[0]) &&
+                (this.Position_boxes.get(i)[1] == this.Position_player[1]+1)) {
+              this.Position_boxes.get(i)[1] = this.Position_player[1]+2;
+              break;
+            }
+          }
+        }
+        this.Position_player[1]++;
+      break;
+    }
+  }
+
+  
+  public boolean Valid_Move (char move) {
+    //switch case for the moves
+    //obtain player position
+    // if player collides with box, check if box can be moved (change box position accordingly)
+    // if player collides with wall, invalid
+    //should also encode the positions to a statekey to check if explored
+    String stateKey_temp;
+    int[] player_pos_temp = new int[] {this.Position_player[0], this.Position_player[1]};
+    switch(move) {
+      case 'u':
+        if (this.WallsMap[this.Position_player[0]-1][this.Position_player[1]] == '#') {
+          return false;
+        }
+        else if (this.WallsMap[this.Position_player[0]-1][this.Position_player[1]] == ' ' &&
+            !this.boxMap.contains((this.Position_player[0]-1) + "," + this.Position_player[1])) {
+          player_pos_temp = new int[] {this.Position_player[0]-1, this.Position_player[1]};
+          stateKey_temp = EncodeState(player_pos_temp, this.Position_boxes);
+          if (!isAlreadyExplored(stateKey_temp)) { 
+            return true;
+          }
+          else {
+            return false;
+          }
+        }
+        else if (!Player_pushcollidingbox_valid('u')) {
+          return false;
+        }
+        break;
+      case 'd':
+        if (this.WallsMap[this.Position_player[0]+1][this.Position_player[1]] == '#') {
+          return false;
+        }
+        else if (this.WallsMap[this.Position_player[0]+1][this.Position_player[1]] == ' ' &&
+            !this.boxMap.contains((this.Position_player[0]+1) + "," + this.Position_player[1])) {
+          player_pos_temp = new int[] {this.Position_player[0]+1, this.Position_player[1]};
+          stateKey_temp = EncodeState(player_pos_temp, this.Position_boxes);
+          if (!isAlreadyExplored(stateKey_temp)) { 
+            return true;
+          }
+          else {
+            return false;
+          }
+        }
+        else if (!Player_pushcollidingbox_valid('d')) {
+          return false;
+        }
+      break;
+      case 'l':
+        if (this.WallsMap[this.Position_player[0]][this.Position_player[1]-1] == '#') {
+          return false;
+        }
+        else if (this.WallsMap[this.Position_player[0]][this.Position_player[1]-1] == ' ' &&
+            !this.boxMap.contains(this.Position_player[0] + "," + (this.Position_player[1]-1))) {
+          player_pos_temp = new int[] {this.Position_player[0], this.Position_player[1]-1};
+          stateKey_temp = EncodeState(player_pos_temp, this.Position_boxes);
+          if (!isAlreadyExplored(stateKey_temp)) { 
+            return true;
+          }
+          else {
+            return false;
+          }
+        }
+        else if (!Player_pushcollidingbox_valid('l')) {
+          return false;
+        }
+      break;
+      case 'r':
+        if (this.WallsMap[this.Position_player[0]][this.Position_player[1]+1] == '#') {
+          return false;
+        }
+        else if (this.WallsMap[this.Position_player[0]][this.Position_player[1]+1] == ' ' &&
+            !this.boxMap.contains(this.Position_player[0] + "," + (this.Position_player[1]+1))) {
+          player_pos_temp = new int[] {this.Position_player[0], this.Position_player[1]+1};
+          stateKey_temp = EncodeState(player_pos_temp, this.Position_boxes);
+          if (!isAlreadyExplored(stateKey_temp)) { 
+            return true;
+          }
+          else {
+            return false;
+          }
+        }
+        else if (!Player_pushcollidingbox_valid('r')) {
+          return false;
+        }
+      break;
+    }
+    return true;
+  }
+
+  
+  public boolean isAlreadyExplored(String stateKey) {
+    return this.ExploredStates.containsKey(stateKey);
+  }
+
+  //outputs false if push is invalid or state is explored
+  public boolean Player_pushcollidingbox_valid(char move) {
+    String box_pos1, box_pos2;
+    // cannot do ArrayList<int[]> temp_box_positions = this.Position_boxes; reference only kasi, hard copy instead
+    int[] new_player_pos_temp;
+    ArrayList<int[]> temp_box_positions;
+    switch(move) {
+      case 'u':
+        box_pos1 = (this.Position_player[0]-1) + "," + this.Position_player[1];
+        box_pos2 = (this.Position_player[0]-2) + "," + this.Position_player[1];
+        
+        //three invalid scenarios: player,box,wall ; player,box,box ; player,box -> deadlock
+        if (this.boxMap.contains(box_pos1) && 
+          ((this.WallsMap[this.Position_player[0]-2][this.Position_player[1]] == '#') || 
+          this.boxMap.contains(box_pos2) || 
+          this.Position_deadlocks.contains(box_pos2))) {
+          return false;
+        }
+        
+        else if (this.boxMap.contains(box_pos1)) {
+          new_player_pos_temp = new int[] {this.Position_player[0]-1, this.Position_player[1]};
+          temp_box_positions = CreateTemp_BoxPositions(
+            new int[]{this.Position_player[0]-1, this.Position_player[1]}, 
+            new int[]{this.Position_player[0]-2, this.Position_player[1]});
+          String statekey_temp = EncodeState(new_player_pos_temp, temp_box_positions);
+          
+          return !isAlreadyExplored(statekey_temp);
+        }
+      break;
+      case 'd':
+        box_pos1 = (this.Position_player[0]+1) + "," + this.Position_player[1];
+        box_pos2 = (this.Position_player[0]+2) + "," + this.Position_player[1];
+        
+        //three invalid scenarios: player,box,wall ; player,box,box ; player,box -> deadlock
+        if (this.boxMap.contains(box_pos1) && 
+          ((this.WallsMap[this.Position_player[0]+2][this.Position_player[1]] == '#') || 
+          this.boxMap.contains(box_pos2) || 
+          this.Position_deadlocks.contains(box_pos2))) {
+          return false;
+        }
+
+        else if (this.boxMap.contains(box_pos1)) {
+          new_player_pos_temp = new int[] {this.Position_player[0]+1, this.Position_player[1]};
+          temp_box_positions = CreateTemp_BoxPositions(
+            new int[]{this.Position_player[0]+1, this.Position_player[1]}, 
+            new int[]{this.Position_player[0]+2, this.Position_player[1]});
+          String statekey_temp = EncodeState(new_player_pos_temp, temp_box_positions);
+          
+          return !isAlreadyExplored(statekey_temp);
+        }
+      break;
+      case 'l':
+        box_pos1 = this.Position_player[0] + "," + (this.Position_player[1]-1);
+        box_pos2 = this.Position_player[0] + "," + (this.Position_player[1]-2);
+        
+        //three invalid scenarios: player,box,wall ; player,box,box ; player,box -> deadlock
+        if (this.boxMap.contains(box_pos1) && 
+          ((this.WallsMap[this.Position_player[0]][this.Position_player[1]-2] == '#') || 
+          this.boxMap.contains(box_pos2) || 
+          this.Position_deadlocks.contains(box_pos2))) {
+          return false;
+        }
+
+        else if (this.boxMap.contains(box_pos1)) {
+          new_player_pos_temp = new int[] {this.Position_player[0], this.Position_player[1]-1};
+          temp_box_positions = CreateTemp_BoxPositions(
+            new int[]{this.Position_player[0], this.Position_player[1]-1}, 
+            new int[]{this.Position_player[0], this.Position_player[1]-2});
+          String statekey_temp = EncodeState(new_player_pos_temp, temp_box_positions);
+          
+          return !isAlreadyExplored(statekey_temp);
+        }
+      break;
+      case 'r':
+        box_pos1 = this.Position_player[0] + "," + (this.Position_player[1]+1);
+        box_pos2 = this.Position_player[0] + "," + (this.Position_player[1]+2);
+        
+        //three invalid scenarios: player,box,wall ; player,box,box ; player,box -> deadlock
+        if (this.boxMap.contains(box_pos1) && 
+          ((this.WallsMap[this.Position_player[0]][this.Position_player[1]+2] == '#') || 
+          this.boxMap.contains(box_pos2) || 
+          this.Position_deadlocks.contains(box_pos2))) {
+          return false;
+        }
+        else if (this.boxMap.contains(box_pos1)) {
+          new_player_pos_temp = new int[] {this.Position_player[0], this.Position_player[1]+1};
+          temp_box_positions = CreateTemp_BoxPositions(
+            new int[]{this.Position_player[0], this.Position_player[1]+1}, 
+            new int[]{this.Position_player[0], this.Position_player[1]+2});
+          String statekey_temp = EncodeState(new_player_pos_temp, temp_box_positions);
+          
+          return !isAlreadyExplored(statekey_temp);
+        }
+      break;
+    }
+    return true;
+  }
+
+  public ArrayList<int[]> CreateTemp_BoxPositions(int[] old_box_pos, int[] new_box_pos) {
+    ArrayList<int[]> temp_box_pos = new ArrayList<>();
+    for (int i = 0; i < this.box_count; i++) {
+      if (this.Position_boxes.get(i)[0] == old_box_pos[0] &&
+          this.Position_boxes.get(i)[1] == old_box_pos[1]) {
+            temp_box_pos.add(new int[] {new_box_pos[0], new_box_pos[1]});
+          }
+          else {
+            temp_box_pos.add(new int[] {this.Position_boxes.get(i)[0], this.Position_boxes.get(i)[1]});
+          }
+    }
+    return temp_box_pos;
+  }
+  /*we should have the following functions:
+    1. ValidMove
+    2. UpdatePositions
+    3. IsGoalState
+
+  */
+
   //Initially I was thinking of doing manhattan distance of each box to every goal, it wasn't efficient, and I thought rin na choosing the min manhattahn idstance for each box to their closest goal is not enough (too much repeated computation). I came across Hungarian algorithm which reduces the computation needed for not needing the repeated finding of minimum distances. I implemented box to goal assigned manhattan distances (that were assigned via Hungarian algo)
   //serves as heuristic function
   // ONLY COMPUTES THE MANHATTAN DISTANCE OF BOXES TO ASSIGNED GOALS, NO PENALTY YET FOR DEADLOCKS
+  // IMPORTANT!!!: CALL AFTER ASSIGNING BOXES TO GOALS
   private int computeManhattanDistances() {
     int totalDistance = 0;
     for (int i = 0; i < box_count; i++) {
@@ -78,20 +454,111 @@ public class SokoBot {
     return Math.abs(pos1[0] - pos2[0]) + Math.abs(pos1[1] - pos2[1]);
   }
 
-  //class to represent position
-  private class State {
-    //String stateKey; //stateKey will be passed down through functions naman, myb no need
-    String previousStateKey;
-    int totalCostsoFar;
+  //just search how to make string out of arrays and I eventually found this:
+  //https://www.geeksforgeeks.org/java/stringbuilder-class-in-java-with-examples/
+  public String EncodeState(int[] player, ArrayList<int[]> boxes) {
+    StringBuilder StateKey_enc = new StringBuilder();
+    StateKey_enc.append(player[0]).append(',').append(player[1]);
+    for (int[] box : boxes) {
+      StateKey_enc.append(' ').append(box[0]).append(',').append(box[1]);
+    }
+    return StateKey_enc.toString();
+  }
 
-    public State(String previousStateKey, int totalCostsoFar) {
-      //this.stateKey = stateKey;
+  private boolean State_isA_GoalState() {
+    int min_distance_temp;
+    int temp_dist;
+    for (int i = 0; i < this.box_count; i++) {
+      min_distance_temp = Integer.MAX_VALUE;
+      for(int j = 0; j < this.box_count; j++) {
+        temp_dist = computeManhattanDistance(this.Position_boxes.get(i), this.Position_goals.get(j));
+        if (temp_dist < min_distance_temp) {
+          min_distance_temp = temp_dist;
+        }
+      }
+      if (min_distance_temp > 0) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  public void DecodeState(String stateKey_dec) {
+    String[] positions = stateKey_dec.split(" ");
+    String[] player_pos = positions[0].split(",");
+    //we are trying to modify the SokoBot class variables here
+    this.Position_player[0] = Integer.parseInt(player_pos[0]);
+    this.Position_player[1] = Integer.parseInt(player_pos[1]);
+    this.Position_boxes.clear();
+    this.boxMap.clear();
+    //now update Position_boxes
+    for (int i = 1; i < positions.length; i++) {
+      this.boxMap.add(positions[i]);
+      String[] box_pos = positions[i].split(",");
+      this.Position_boxes.add(new int[]{Integer.parseInt(box_pos[0]), Integer.parseInt(box_pos[1])});
+    }
+    //maybe we should make a map of the boxes for easier checking of valid move, FIXED, added this.boxMap.add(positions[i]);
+  }
+
+  //class to represent position
+  private class State implements Comparable<State> {
+    //String stateKey; //stateKey will be passed down through functions naman, myb no need
+    String StateKey;
+    String previousStateKey;
+    int g_Cost;
+    int f_cost;
+    //the move that led to the state from previous state
+    char prevMove; //'u', 'd', 'l', 'r'
+
+    public State (String stateKey, String previousStateKey, int g_Cost, int f_cost, char previousMove) {
+      this.StateKey = stateKey;
       this.previousStateKey = previousStateKey;
-      this.totalCostsoFar = totalCostsoFar;
+      this.g_Cost = g_Cost;
+      this.f_cost = f_cost;
+      this.prevMove = previousMove;
+    } 
+
+    public String getStateKey() {
+      return this.StateKey;
+    }
+
+    public String getPreviousStateKey() {
+      return this.previousStateKey;
+    }
+
+    public char getPrevMove() {
+      return this.prevMove;
+    }
+
+    public int getG_Cost() {
+      return this.g_Cost;
+    }
+
+    public int getF_Cost() {
+      return this.f_cost;
+    }
+
+    //by default this has to be overriden for classes that implement Comparable
+    @Override
+    public int compareTo(State other_state) {
+      return Integer.compare(this.f_cost, other_state.getF_Cost());
     }
   }
 
+
   private void initializeMapData(int width, int height, char[][] mapData, char[][] itemsData) {
+    this.validMoves = new char[] {'u', 'd', 'l', 'r'};
+    this.width = width;
+    this.height = height;
+    
+    //we copy mapdata to WallsMap but goals are spaces
+    this.WallsMap = new char[height][width];
+    for (int i = 0; i < height; i++) {
+      for (int j = 0; j < width; j++) {
+        this.WallsMap[i][j] = (mapData[i][j] == '.') ? ' ' : mapData[i][j];
+      }
+    }
+
     this.Position_boxes.clear();
     this.Position_goals.clear();
     this.Position_deadlocks.clear();
@@ -104,22 +571,22 @@ public class SokoBot {
           if (mapData[i-1][j] == '#') {
             //upper diagonal left
             if (mapData[i-1][j-1] == '#' && mapData[i][j-1] == '#')
-              Position_deadlocks.add(new int[]{i, j});
+              Position_deadlocks.add(i + "," + j);
             //upper diagonal right
             else if (mapData[i-1][j+1] == '#' && mapData[i][j+1] == '#')
-            Position_deadlocks.add(new int[]{i, j});
+              Position_deadlocks.add(i + "," + j);
           }
           //wall below
           else if (mapData[i+1][j] == '#') {
             //lower diagonal left
             if (mapData[i+1][j-1] == '#' && mapData[i][j-1] == '#')
-              Position_deadlocks.add(new int[]{i, j});
+              Position_deadlocks.add(i + "," + j);
             //lower diagonal right
             else if (mapData[i+1][j+1] == '#' && mapData[i][j+1] == '#')
-              Position_deadlocks.add(new int[]{i, j});
+              Position_deadlocks.add(i + "," + j);
           }
         }
-        if (mapData[i][j] == '#') continue;
+        if (mapData[i][j] == '#') this.WallsMap[i][j] = '#';
         if (mapData[i][j] == '.') Position_goals.add(new int[]{i, j});
         if (itemsData[i][j] == '$') {
           Position_boxes.add(new int[]{i, j});
