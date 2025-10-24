@@ -32,17 +32,6 @@ public class SokoBot {
     //compute manhattan distances from each box to each goal position
     public String solveSokobanPuzzle(int width, int height, char[][] mapData, char[][] itemsData) {
 
-
-
-        /**
-         * We need to:
-         * 1. cutoff deadlocks
-         * 2. implement manhattan distance heuristic for A* search
-         * 3. implement Dynamic Programming to store best Manhattan paths between goal states from boxes
-         * 4. Implement Dynamic Programming to store best actions from player to boxes
-         * 5. implement A* search
-         */
-
         initializeMapData(width, height, mapData, itemsData);
         // do assignment of boxes to goals using Hungarian algo (explanation at Manhattan Distance function)
 
